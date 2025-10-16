@@ -12,8 +12,11 @@ from PIL import Image
 # ==========================
 # MODEL PATHS (Update these if needed)
 # ==========================
-TREE_MODEL_PATH = "models/tree_best.pt"
-AIRCRAFT_MODEL_PATH = "models/aircraft_best.pt"
+import os
+
+# Relative paths — models are in /models folder in repo
+TREE_MODEL_PATH = os.path.join("models", "tree_best.pt")
+AIRCRAFT_MODEL_PATH = os.path.join("models", "aircraft_best.pt")
 
 # Load models once (Streamlit caches this if you use @st.cache_resource)
 @st.cache_resource
@@ -164,4 +167,5 @@ if st.button("Run Detection"):
                         data=f,
                         file_name="detection_results.zip",
                         mime="application/zip"
+
                     )
