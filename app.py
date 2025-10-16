@@ -8,6 +8,7 @@ from pathlib import Path
 import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
+import cv2
 
 # ==========================
 # MODEL PATHS (Update these if needed)
@@ -169,3 +170,4 @@ if st.button("Run Detection"):
                         mime="application/zip"
 
                     )
+
