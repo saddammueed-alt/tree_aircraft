@@ -1,6 +1,7 @@
-streamlit
 ultralytics
-opencv-python-headless
+streamlit
 pandas
-Pillow
+pillow
 openpyxl
+torch
+torchvision
