@@ -1,25 +1,18 @@
 # app.py
-import os
-import shutil
-import tempfile
-import glob
-import pandas as pd
-from pathlib import Path
 import streamlit as st
 from ultralytics import YOLO
-from PIL import Image
-import cv2
-
-# ==========================
-# MODEL PATHS (Update these if needed)
-# ==========================
 import os
+import pandas as pd
+from glob import glob
+import shutil
 
-# Relative paths — models are in /models folder in repo
-TREE_MODEL_PATH = os.path.join("models", "tree_best.pt")
-AIRCRAFT_MODEL_PATH = os.path.join("models", "aircraft_best.pt")
+# ==========================
+# CONFIGURATION
+# ==========================
+TREE_MODEL_PATH = "models/tree_best.pt"
+AIRCRAFT_MODEL_PATH = "models/aircraft_best.pt"
 
-# Load models once (Streamlit caches this if you use @st.cache_resource)
+# Lazy load models
 @st.cache_resource
 def load_models():
     tree_model = YOLO(TREE_MODEL_PATH)
@@ -28,146 +21,89 @@ def load_models():
 
 tree_model, aircraft_model = load_models()
 
-def run_detection(input_dir, output_dir, confidence, task):
-    if task == "Tree Detection":
-        model = tree_model
-        imgsz = (256, 256)
-        save_crop = True
-        show_labels = False
-        project_name = "predict"
-    elif task == "Aircraft Detection":
-        model = aircraft_model
-        imgsz = 1024
-        save_crop = True
-        show_labels = True
-        project_name = "predictions"
-    else:
-        raise ValueError("Invalid task")
-
-    # Run YOLO prediction
-    model.predict(
-        source=input_dir,
-        save=True,
-        project=output_dir,
-        name=project_name,
-        imgsz=imgsz,
-        conf=confidence,
-        line_width=2,
-        show_conf=False,
-        save_crop=save_crop,
-        save_txt=True,
-        show_labels=show_labels,
-        exist_ok=True,
-        classes=[0]
-    )
-
-    # Count detections
-    predict_folder = Path(output_dir) / project_name
-    label_dir = predict_folder / "labels"
-    total_count = 0
-
-    if label_dir.exists():
-        label_files = list(label_dir.glob("*.txt"))
-        total_count = sum(len(open(f).readlines()) for f in label_files)
-
-    # Move crops for tree detection
-    if task == "Tree Detection":
-        cropped_folder = Path(output_dir) / "cropped"
-        cropped_folder.mkdir(exist_ok=True)
-        crop_paths = list((predict_folder / "crops").rglob("*.jpg"))
-        for img_path in crop_paths:
-            shutil.move(str(img_path), cropped_folder / img_path.name)
-
-    # Save Excel
-    if label_dir.exists():
-        label_files = list(label_dir.glob("*.txt"))
-        df = pd.DataFrame({
-            "Image": [f.stem for f in label_files],
-            f"{task.split()[0]} Count": [len(open(f).readlines()) for f in label_files]
-        })
-        df.loc["Total"] = ["Grand Total", total_count]
-        excel_path = Path(output_dir) / f"{task.lower().replace(' ', '_')}_counts.xlsx"
-        df.to_excel(excel_path, index=False)
-
-    return total_count, project_name
-
 # ==========================
 # STREAMLIT UI
 # ==========================
 st.set_page_config(page_title="Trees & Aircraft Detection", layout="centered")
-st.title("🌳✈️ Trees & Aircraft Detection and Counting")
 
-# Sidebar or main UI for inputs
+st.image("bg2.png", use_container_width=True)
+st.title("🌲 Trees & ✈️ Aircraft Detection & Counting")
+
+# Task Selection
 task = st.selectbox("Select Task", ["Tree Detection", "Aircraft Detection"])
 
-uploaded_files = st.file_uploader(
-    "Upload Images (JPG/PNG)",
-    type=["jpg", "jpeg", "png"],
-    accept_multiple_files=True
-)
+# Folder Inputs
+input_folder = st.text_input("📁 Input Folder Path", "")
+output_folder = st.text_input("💾 Output Folder Path", "")
 
-confidence = st.slider("Confidence Threshold", 0.0, 1.0, 0.1, 0.05)
+confidence = st.slider("Detection Confidence", 0.0, 1.0, 0.1, 0.05)
 
-if st.button("Run Detection"):
-    if not uploaded_files:
-        st.error("Please upload at least one image.")
+run_button = st.button("🚀 Run Detection")
+
+if run_button:
+    if not input_folder or not output_folder:
+        st.error("Please provide both input and output folder paths.")
     else:
-        with st.spinner("Running detection..."):
-            # Create temporary input directory
-            with tempfile.TemporaryDirectory() as temp_input, tempfile.TemporaryDirectory() as temp_output:
-                input_dir = Path(temp_input)
-                output_dir = Path(temp_output)
+        with st.spinner(f"Running {task}..."):
+            # Select model
+            if task == "Tree Detection":
+                model = tree_model
+                imgsz = (256, 256)
+                save_crop = True
+                show_labels = False
+                project_name = "predict"
+            else:
+                model = aircraft_model
+                imgsz = 1024
+                save_crop = True
+                show_labels = True
+                project_name = "predictions"
 
-                # Save uploaded files
-                for file in uploaded_files:
-                    with open(input_dir / file.name, "wb") as f:
-                        f.write(file.getbuffer())
+            # Run YOLO inference
+            model.predict(
+                source=input_folder,
+                save=True,
+                project=output_folder,
+                name=project_name,
+                imgsz=imgsz,
+                conf=confidence,
+                line_width=2,
+                show_conf=False,
+                save_crop=save_crop,
+                save_txt=True,
+                show_labels=show_labels,
+                exist_ok=True,
+                classes=[0]
+            )
 
-                # Run detection
-                try:
-                    total_count, project_name = run_detection(
-                        str(input_dir),
-                        str(output_dir),
-                        confidence,
-                        task
-                    )
-                except Exception as e:
-                    st.error(f"Error during detection: {e}")
-                    st.stop()
+            # Results
+            predict_folder = os.path.join(output_folder, project_name)
+            label_dir = os.path.join(predict_folder, "labels")
 
-                # Display count
-                obj_name = task.split()[0]
-                st.success(f"✅ {task} complete!")
-                st.metric(f"{obj_name} Count", total_count)
+            if not os.path.exists(label_dir):
+                total_objects = 0
+            else:
+                label_files = glob(os.path.join(label_dir, "*.txt"))
+                total_objects = sum(len(open(f).readlines()) for f in label_files)
 
-                # Show sample results (first 4 images)
-                predict_folder = output_dir / project_name
-                result_images = list(predict_folder.glob("*.jpg")) + list(predict_folder.glob("*.png"))
-                if result_images:
-                    st.subheader("Detection Results (Sample)")
-                    cols = st.columns(min(4, len(result_images)))
-                    for i, img_path in enumerate(result_images[:4]):
-                        img = Image.open(img_path)
-                        cols[i].image(img, use_column_width=True, caption=img_path.name)
+            if task == "Tree Detection":
+                cropped_folder = os.path.join(output_folder, "cropped")
+                os.makedirs(cropped_folder, exist_ok=True)
+                cropped_images = glob(os.path.join(predict_folder, "crops", "*", "*.jpg"))
+                for img in cropped_images:
+                    shutil.move(img, os.path.join(cropped_folder, os.path.basename(img)))
 
-                # Provide download for results
-                # Create ZIP of output folder
-                import zipfile
-                zip_path = output_dir / "results.zip"
-                with zipfile.ZipFile(zip_path, 'w') as zf:
-                    for root, dirs, files in os.walk(output_dir):
-                        for file in files:
-                            if file == "results.zip":
-                                continue
-                            zf.write(os.path.join(root, file),
-                                     os.path.relpath(os.path.join(root, file), output_dir))
-
-                with open(zip_path, "rb") as f:
-                    st.download_button(
-                        label="📥 Download All Results (ZIP)",
-                        data=f,
-                        file_name="detection_results.zip",
-                        mime="application/zip"
-
-                    )
-
+            # Save results to Excel
+            if os.path.exists(label_dir):
+                label_files = glob(os.path.join(label_dir, "*.txt"))
+                df = pd.DataFrame({
+                    "Image": [os.path.basename(f).replace('.txt', '') for f in label_files],
+                    f"{task.split()[0]} Count": [len(open(f).readlines()) for f in label_files]
+                })
+                df.loc["Total"] = ["Grand Total", total_objects]
+                out_path = os.path.join(output_folder, f"{task.lower().replace(' ', '_')}_counts.xlsx")
+                df.to_excel(out_path, index=False)
+                st.success(f"{task} complete! Total count: {total_objects}")
+                st.download_button("📥 Download Excel Results", open(out_path, "rb"), file_name=os.path.basename(out_path))
+            else:
+                st.warning("No detections found.")
